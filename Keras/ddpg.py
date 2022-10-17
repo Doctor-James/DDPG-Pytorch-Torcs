@@ -1,6 +1,13 @@
 from gym_torcs import TorcsEnv
 import numpy as np
-
+import random
+import argparse
+from keras.models import model_from_json, Model
+from keras.models import Sequential
+from keras.layers.core import Dense, Dropout, Activation, Flatten
+from keras.optimizers import Adam
+import tensorflow as tf
+from keras.engine.training import collect_trainable_weights
 import json
 
 from ReplayBuffer import ReplayBuffer
@@ -35,20 +42,30 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
     epsilon = 1
     indicator = 0
 
+    #Tensorflow GPU optimization
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    sess = tf.Session(config=config)
+    from keras import backend as K
+    K.set_session(sess)
 
-
-    actor = ActorNetwork(state_dim)
-    actor_target = ActorNetwork(state_dim)
-    critic = CriticNetwork(state_dim, action_dim)
-    critic_target = CriticNetwork(state_dim, action_dim)
+    actor = ActorNetwork(sess, state_dim, action_dim, BATCH_SIZE, TAU, LRA)
+    critic = CriticNetwork(sess, state_dim, action_dim, BATCH_SIZE, TAU, LRC)
     buff = ReplayBuffer(BUFFER_SIZE)    #Create replay buffer
 
     # Generate a Torcs environment
     env = TorcsEnv(vision=vision, throttle=True,gear_change=False)
 
-
     #Now load the weight
-
+    print("Now we load the weight")
+    try:
+        actor.model.load_weights("actormodel.h5")
+        critic.model.load_weights("criticmodel.h5")
+        actor.target_model.load_weights("actormodel.h5")
+        critic.target_model.load_weights("criticmodel.h5")
+        print("Weight load successfully")
+    except:
+        print("Cannot find the weight")
 
     print("TORCS Experiment Start.")
     for i in range(episode_count):
@@ -69,7 +86,7 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
             a_t = np.zeros([1,action_dim])
             noise_t = np.zeros([1,action_dim])
             
-            a_t_original = actor(s_t.reshape(1, s_t.shape[0]))
+            a_t_original = actor.model.predict(s_t.reshape(1, s_t.shape[0]))
             noise_t[0][0] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][0],  0.0 , 0.60, 0.30)
             noise_t[0][1] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][1],  0.5 , 1.00, 0.10)
             noise_t[0][2] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][2], -0.1 , 1.00, 0.05)
