@@ -8,7 +8,8 @@ from ActorNetwork import ActorNetwork
 from CriticNetwork import CriticNetwork
 from OU import OU
 import timeit
-
+import torch
+isTrain = True
 OU = OU()       #Ornstein-Uhlenbeck Process
 
 def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
@@ -64,12 +65,13 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
      
         total_reward = 0.
         for j in range(max_steps):
-            loss = 0 
+            loss_critic = 0
             epsilon -= 1.0 / EXPLORE
             a_t = np.zeros([1,action_dim])
             noise_t = np.zeros([1,action_dim])
             
             a_t_original = actor(s_t.reshape(1, s_t.shape[0]))
+            a_t_original = a_t_original.detach().numpy()
             noise_t[0][0] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][0],  0.0 , 0.60, 0.30)
             noise_t[0][1] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][1],  0.5 , 1.00, 0.10)
             noise_t[0][2] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][2], -0.1 , 1.00, 0.05)
@@ -98,8 +100,8 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
             dones = np.asarray([e[4] for e in batch])
             y_t = np.asarray([e[1] for e in batch])
 
-            target_q_values = critic.target_model.predict([new_states, actor.target_model.predict(new_states)])  
-           
+            target_q_values = critic_target(new_states, actor_target(new_states))
+            target_q_values = target_q_values.detach().numpy()
             for k in range(len(batch)):
                 if dones[k]:
                     y_t[k] = rewards[k]
@@ -107,17 +109,31 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
                     y_t[k] = rewards[k] + GAMMA*target_q_values[k]
        
             if (train_indicator):
-                loss += critic.model.train_on_batch([states,actions], y_t) 
-                a_for_grad = actor.model.predict(states)
-                grads = critic.gradients(states, a_for_grad)
-                actor.train(states, grads)
-                actor.target_train()
-                critic.target_train()
+                optimizer_actor = torch.optim.Adam(actor.parameters(), lr=0.0001)
+                optimizer_critic = torch.optim.Adam(critic.parameters(), lr=0.001)
+                loss_func_c = torch.nn.CrossEntropyLoss()
+
+
+                loss_critic += loss_func_c(critic(states,actions),y_t)
+                optimizer_critic.zero_grad()
+                loss_critic.backward()
+                optimizer_critic.step()
+
+                actor_target.target_train(actor, TAU)
+                critic_target.target_train(critic,TAU)
+
+
+                # loss += loss_func(critic(states,actions), y_t)
+                # a_for_grad = actor.model.predict(states)
+                # grads = critic.gradients(states, a_for_grad)
+                # actor.train(states, grads)
+                # actor.target_train()
+                # critic.target_train()
 
             total_reward += r_t
             s_t = s_t1
         
-            print("Episode", i, "Step", step, "Action", a_t, "Reward", r_t, "Loss", loss)
+            print("Episode", i, "Step", step, "Action", a_t, "Reward", r_t, "Loss", loss_critic)
         
             step += 1
             if done:
@@ -125,14 +141,11 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
 
         if np.mod(i, 3) == 0:
             if (train_indicator):
-                print("Now we save model")
-                actor.model.save_weights("actormodel.h5", overwrite=True)
-                with open("actormodel.json", "w") as outfile:
-                    json.dump(actor.model.to_json(), outfile)
+                torch.save(actor, "./actor.pt")
+                torch.save(actor_target, "./actor_target.pt")
+                torch.save(critic, "./critic.pt")
+                torch.save(critic_target, "./critic_target.pt")
 
-                critic.model.save_weights("criticmodel.h5", overwrite=True)
-                with open("criticmodel.json", "w") as outfile:
-                    json.dump(critic.model.to_json(), outfile)
 
         print("TOTAL REWARD @ " + str(i) +"-th Episode  : Reward " + str(total_reward))
         print("Total Step: " + str(step))
@@ -142,4 +155,4 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
     print("Finish.")
 
 if __name__ == "__main__":
-    playGame()
+    playGame(isTrain)
