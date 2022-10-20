@@ -17,9 +17,9 @@ class ActorNetwork(nn.Module):
         self.Brake = nn.Sequential(nn.Linear(in_features=600,out_features=1),
                                  nn.Sigmoid()
                                  ).to(torch.float64)
-
+        self.device = "cuda:0"
     def forward(self, x):
-        x = torch.tensor(x)
+        x = torch.tensor(x).to(self.device)
         x = self.mlp(x)
         Steering = self.Steering(x)
         Acceleration = self.Acceleration(x)

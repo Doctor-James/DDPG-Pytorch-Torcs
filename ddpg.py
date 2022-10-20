@@ -37,11 +37,11 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
     indicator = 0
 
 
-
-    actor = ActorNetwork(state_dim)
-    actor_target = ActorNetwork(state_dim)
-    critic = CriticNetwork(state_dim, action_dim)
-    critic_target = CriticNetwork(state_dim, action_dim)
+    device = 'cuda:0'
+    actor = ActorNetwork(state_dim).to(device)
+    actor_target = ActorNetwork(state_dim).to(device)
+    critic = CriticNetwork(state_dim, action_dim).to(device)
+    critic_target = CriticNetwork(state_dim, action_dim).to(device)
     buff = ReplayBuffer(BUFFER_SIZE)    #Create replay buffer
 
     # Generate a Torcs environment
@@ -65,13 +65,13 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
      
         total_reward = 0.
         for j in range(max_steps):
-            loss_critic = 0
+            loss = 0
             epsilon -= 1.0 / EXPLORE
             a_t = np.zeros([1,action_dim])
             noise_t = np.zeros([1,action_dim])
             
             a_t_original = actor(s_t.reshape(1, s_t.shape[0]))
-            a_t_original = a_t_original.detach().numpy()
+            a_t_original = a_t_original.cpu().detach().numpy()
             noise_t[0][0] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][0],  0.0 , 0.60, 0.30)
             noise_t[0][1] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][1],  0.5 , 1.00, 0.10)
             noise_t[0][2] = train_indicator * max(epsilon, 0) * OU.function(a_t_original[0][2], -0.1 , 1.00, 0.05)
@@ -101,7 +101,7 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
             y_t = np.asarray([e[1] for e in batch])
 
             target_q_values = critic_target(new_states, actor_target(new_states))
-            target_q_values = target_q_values.detach().numpy()
+            target_q_values = target_q_values.cpu().detach().numpy()
             for k in range(len(batch)):
                 if dones[k]:
                     y_t[k] = rewards[k]
@@ -111,29 +111,32 @@ def playGame(train_indicator=0):    #1 means Train, 0 means simply Run
             if (train_indicator):
                 optimizer_actor = torch.optim.Adam(actor.parameters(), lr=0.0001)
                 optimizer_critic = torch.optim.Adam(critic.parameters(), lr=0.001)
-                loss_func_c = torch.nn.CrossEntropyLoss()
+                loss_func_c = torch.nn.MSELoss()
 
+                #update actor
+                a_for_grad = actor(states)
+                output = critic(states,a_for_grad)
+                loss_actor = -torch.mean(output)  #目标最大化value，即-value为loss函数
+                optimizer_actor.zero_grad()
+                loss_actor.backward()
+                optimizer_critic.step()
 
-                loss_critic += loss_func_c(critic(states,actions),y_t)
+                # update critic
+                loss_critic = loss_func_c(critic(states,actions),torch.Tensor(y_t).to(torch.float64).to(device))
                 optimizer_critic.zero_grad()
                 loss_critic.backward()
                 optimizer_critic.step()
+                loss += loss_critic.item()
 
                 actor_target.target_train(actor, TAU)
                 critic_target.target_train(critic,TAU)
 
 
-                # loss += loss_func(critic(states,actions), y_t)
-                # a_for_grad = actor.model.predict(states)
-                # grads = critic.gradients(states, a_for_grad)
-                # actor.train(states, grads)
-                # actor.target_train()
-                # critic.target_train()
 
             total_reward += r_t
             s_t = s_t1
         
-            print("Episode", i, "Step", step, "Action", a_t, "Reward", r_t, "Loss", loss_critic)
+            print("Episode", i, "Step", step, "Action", a_t, "Reward", r_t, "Loss", loss)
         
             step += 1
             if done:

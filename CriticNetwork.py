@@ -18,10 +18,10 @@ class CriticNetwork(nn.Module):
         self.mlp_as2 = nn.Sequential(nn.Linear(in_features=600, out_features=action_size),
                                  # nn.ReLU(inplace=True),
                                  ).to(torch.float64)
-
+        self.device = "cuda:0"
     def forward(self, state, action):
-        state = torch.tensor(state)
-        action = torch.tensor(action)
+        state = torch.tensor(state).to(self.device)
+        action = torch.tensor(action).to(self.device)
         s1 = self.mlp_s1(state)
         s2 = self.mlp_s2(s1)
         a1 = self.mlp_a1(action)
